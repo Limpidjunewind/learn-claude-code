@@ -88,6 +88,15 @@ class TaskManager:
                 self._clear_dependency(task_id)
         if add_blocked_by:
             task["blockedBy"] = list(set(task["blockedBy"] + add_blocked_by))
+            # Bidirectional: also update the blocking tasks' blocks lists
+            for blocking_id in add_blocked_by:
+                try:
+                    blocking = self._load(blocking_id)
+                    if task_id not in blocking["blocks"]:
+                        blocking["blocks"].append(task_id)
+                        self._save(blocking)
+                except ValueError:
+                    pass
         if add_blocks:
             task["blocks"] = list(set(task["blocks"] + add_blocks))
             # Bidirectional: also update the blocked tasks' blockedBy lists
@@ -103,12 +112,23 @@ class TaskManager:
         return json.dumps(task, indent=2)
 
     def _clear_dependency(self, completed_id: int):
-        """Remove completed_id from all other tasks' blockedBy lists."""
-        for f in self.dir.glob("task_*.json"):
-            task = json.loads(f.read_text())
-            if completed_id in task.get("blockedBy", []):
-                task["blockedBy"].remove(completed_id)
-                self._save(task)
+        """Remove completed_id from all downstream tasks' blockedBy lists."""
+        # Optimized: use blocks list (O(k)) instead of scanning all files (O(n))
+        # Original O(n) implementation:
+        # for f in self.dir.glob("task_*.json"):
+        #     task = json.loads(f.read_text())
+        #     if completed_id in task.get("blockedBy", []):
+        #         task["blockedBy"].remove(completed_id)
+        #         self._save(task)
+        completed = self._load(completed_id)
+        for blocked_id in completed.get("blocks", []):
+            try:
+                blocked = self._load(blocked_id)
+                if completed_id in blocked["blockedBy"]:
+                    blocked["blockedBy"].remove(completed_id)
+                    self._save(blocked)
+            except ValueError:
+                pass
 
     def list_all(self) -> str:
         tasks = []
